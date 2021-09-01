@@ -1,84 +1,157 @@
 package by.terentyev;
 
-import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 
+import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
-import java.util.*;
+import java.io.InputStream;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class WebCrawlerJsoup {
 
-    private static final String keywords = new String("Банки, Курс, Ещё, торги, Беларусь, USD"); // Elon, Tesla, Elon Musk
-    private static final List<String> listKeywords = Arrays.asList(keywords.split("\\s*,\\s*"));
-    private static final String GRID = "#";
-    private static final int LEVEL_DEPTH = 8;
-    private static List<UrlInfo> urlInfos = new ArrayList<>();
+    private static HashMap<String, UrlInfo> foundUrl = new HashMap<>();
+    private static final CrawlerConfig curConfig = new CrawlerConfig();
+    private static String baseUrl;
+    private static Pattern patternHref = Pattern.compile("<a href=\"[:\\w.\\/\\-^s%]+"); //create pattern
+    private static final String END_TAG = "\">";                        //declare regular expression
+    private static final String EMPTY_STRING = "";
+    private static final String START_HREF = "<a href=\"";
+    private static final String HTTP_HREF = "http";
 
     public static void main(String[] args) {
-        String startUrl = new String("https://banki24.by/"); // вводим нужный адрес сайта
 
-        Set<String> foundLinks = new HashSet<>();
-        List<String> blackList = List.of("https://about.google/, https://about.google/intl/en/"); // список сайтов куда
-        // не стоит заходить       // - ПРИКРУТИТЬ
-        getLinks(startUrl, foundLinks, 0);
-
-
-        //вывести urlInfos в файл
-    }
-
-    static void getLinks(String url, Set<String> foundUrls, int level) {
-        if (level > LEVEL_DEPTH || foundUrls.contains(url)) {
-            return;
-        }
-        foundUrls.add(url);
-        System.out.println(url + " = " + level);
-
+        followLinks(curConfig.getStartUrl(), 0); //starting recursion
         try {
-            Document doc = getPageDocument(url);
-
-            urlInfos.add(keywordSearch(doc, listKeywords, url)); // вызов подсчёта ключевых слов
-            Elements elements = doc.select("a");
-            for (Element element : elements) {
-                url = element.absUrl("href").replaceAll("#+", "");
-                if (!foundUrls.contains(url)) { // проверка есть ли страница в посещённых
-                    getLinks(url, foundUrls, level++);
-                }
-            }
+            saveToCsv("output.csv"); // call void to write the result to a file
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    private static Document getPageDocument(String url) throws IOException {
-        return Jsoup.connect(url)
-                .userAgent("Chrome/92.0.4515.159 (Windows NT 6.1; WOW64; rv:5.0) Gecko/20100101 Firefox/5.0")
-                .timeout(10000).get();
+    private static void saveToCsv(String filename) throws IOException { //void for write csv file. Input String for name file
+        File file = new File(filename); //declare file
+        FileWriter fileWriter = new FileWriter(file, false);
+        boolean isFirst = true;
+
+        for (Map.Entry<String, UrlInfo> element : foundUrl.entrySet()) { //excluding reordering of keywords and write
+            if (isFirst) {
+                fileWriter.append(";");
+                fileWriter.append(element.getValue().getKeywordCounter().keySet().stream().map(String::toString).collect(Collectors.joining(";")));
+                fileWriter.append(System.lineSeparator()); //write new line
+            }
+            isFirst = false;
+            fileWriter.append(element.getValue().getUrl() + ";");
+            fileWriter.append(element.getValue().getKeywordCounter().values().stream().map(Object::toString).collect(Collectors.joining(";"))); //write csv output
+            fileWriter.append(System.lineSeparator()); //new line
+        }
+
+        fileWriter.close();
     }
 
-    private static UrlInfo keywordSearch(Document docHtml, List<String> tokens, String url) {
-        UrlInfo urlInfo = new UrlInfo();
-        urlInfo.setUrl(url);
-        int count = 0;
-        List<Integer> countKeywords = new ArrayList<>();
-        for (String token : tokens) {
-            Elements elements = docHtml.select("body"); // НУЖНО добавить поиск в Head HTML
-            String html = elements.text();
-            String patternString = "\\b" + token + "\\b";
-            Pattern patternKeyWordInHtml = Pattern.compile(patternString);
-            Matcher searchKeyword = patternKeyWordInHtml.matcher(html);
-            while (searchKeyword.find()) {
-                count++;
-            }
-            countKeywords.add(count);
-            urlInfo.getKeywordCounter().put(token, count);
-            count = 0;
+
+    static boolean followLinks(String url, int level) {
+
+        if (!curConfig.checkSize(foundUrl.size())) { //check max Visited Pages
+            return false;
         }
-        System.out.println(url + " = " + countKeywords);
-        return urlInfo;
+        if (!curConfig.checkUrls(url, level)) { //check level depth
+            return true;
+        }
+
+        try {
+            String htmlString = getPageDocument(url); //getting the page code through the method
+            Matcher foundHrefMatches = patternHref.matcher(htmlString); //search for tags containing links
+            Document doc = new Document(htmlString); //
+            if (doc == null) { //check for content
+                return true;
+            }
+
+            //заполняем информацию о URL для добавления в список найденных
+            UrlInfo tmpUrlInfo = new UrlInfo();
+            tmpUrlInfo.setUrl(url);
+            //running method for search keywords
+            tmpUrlInfo.setKeywordCounter(keywordSearch(htmlString, curConfig.getListKeywords()));
+
+            if (!addUrl(tmpUrlInfo, level)) {
+                return true;
+            }
+
+            List<String> allMatches = new ArrayList<String>(); //declaring a list to store found matches
+            while (foundHrefMatches.find()) { //add to list allMatches results
+                allMatches.add(foundHrefMatches.group());
+            }
+
+            URL tmpBaseUrl = new URL(url); //declare tmp variable for base URL
+            baseUrl = tmpBaseUrl.getProtocol() + "://" + tmpBaseUrl.getHost(); //base url search for relative links
+
+            List<String> allUrls = allMatches.stream() //collection and normalization of all links on the page
+                    .map(match -> match.replaceAll(START_HREF, EMPTY_STRING)) //clearing links from start tags
+                    .map(match -> match.replaceAll(END_TAG, EMPTY_STRING)) //clearing links from end tags
+                    .map(str -> (str.startsWith(HTTP_HREF)) ? str : baseUrl + str) //converting relative references to absolute
+                    .collect(Collectors.toList());
+
+            for (String tmpUrl : allUrls) {
+                if (!foundUrl.containsKey(tmpUrl)) { // checking if there is a page in visited
+                    //Recursion. Function launch for all new links. level for control level depth
+                    if (!followLinks(tmpUrl, level++)) {
+                        return false;
+                    }
+                }
+
+            }
+
+        } catch (IOException e) {
+            e.getMessage();
+        }
+        return true;
+    }
+
+    private static boolean addUrl(UrlInfo url, int level) {
+        if (foundUrl.containsKey(url.getUrl())) { //check. If the link is in the collection then return
+            return false;
+        }
+
+        foundUrl.put(url.getUrl(), url);
+
+
+        return true;
+    }
+
+    private static String getPageDocument(String newUrl) throws IOException { //getting a document by url
+        try {
+            URL url = new URL(newUrl); //converting String to URL
+            InputStream input = url.openStream(); //receiving a response to a request by URL
+            byte[] buffer = input.readAllBytes(); //byte read into buffer
+            return new String(buffer); //return the received string
+        } catch (IllegalArgumentException e) {
+            e.getMessage();
+            return null;
+        }
+    }
+
+    private static Map<String, Integer> keywordSearch(String html, List<String> tokens) { //
+        Map<String, Integer> keyWords = new HashMap<>(); // //new collection for storing the count of matches found
+        int count;
+
+        for (String token : tokens) {
+            count = 0;
+            Pattern patternKeyWordInHtml = Pattern.compile(token); //creating a pattern by keyword
+            Matcher searchKeyword = patternKeyWordInHtml.matcher(html); //search for matches by keyword
+            while (searchKeyword.find()) {
+                count++; //counting found matches on the page
+            }
+
+            keyWords.put(token, count); //collection for storing the count of matches found
+        }
+        return keyWords;
     }
 
 }
