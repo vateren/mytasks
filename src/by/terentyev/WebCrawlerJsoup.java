@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 
 public class WebCrawlerJsoup {
 
+    //declare variables and hashMap for collect information
     private static HashMap<String, UrlInfo> foundUrl = new HashMap<>();
     private static final CrawlerConfig curConfig = new CrawlerConfig();
     private static String baseUrl;
@@ -28,34 +29,13 @@ public class WebCrawlerJsoup {
 
     public static void main(String[] args) {
 
-        followLinks(curConfig.getStartUrl(), 0); //starting recursion
+        followLinks(curConfig.getStartUrl(), 0); //starting recursion of the program
         try {
-            saveToCsv("output.csv"); // call void to write the result to a file
+            saveToCsv("output.csv"); // call void to write the result to a file after recursion finished
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
-
-    private static void saveToCsv(String filename) throws IOException { //void for write csv file. Input String for name file
-        File file = new File(filename); //declare file
-        FileWriter fileWriter = new FileWriter(file, false);
-        boolean isFirst = true;
-
-        for (Map.Entry<String, UrlInfo> element : foundUrl.entrySet()) { //excluding reordering of keywords and write
-            if (isFirst) {
-                fileWriter.append(";");
-                fileWriter.append(element.getValue().getKeywordCounter().keySet().stream().map(String::toString).collect(Collectors.joining(";")));
-                fileWriter.append(System.lineSeparator()); //write new line
-            }
-            isFirst = false;
-            fileWriter.append(element.getValue().getUrl() + ";");
-            fileWriter.append(element.getValue().getKeywordCounter().values().stream().map(Object::toString).collect(Collectors.joining(";"))); //write csv output
-            fileWriter.append(System.lineSeparator()); //new line
-        }
-
-        fileWriter.close();
-    }
-
 
     static boolean followLinks(String url, int level) {
 
@@ -74,7 +54,7 @@ public class WebCrawlerJsoup {
                 return true;
             }
 
-            //заполняем информацию о URL для добавления в список найденных
+            //fill in the URL information to add
             UrlInfo tmpUrlInfo = new UrlInfo();
             tmpUrlInfo.setUrl(url);
             //running method for search keywords
@@ -152,6 +132,26 @@ public class WebCrawlerJsoup {
             keyWords.put(token, count); //collection for storing the count of matches found
         }
         return keyWords;
+    }
+
+    private static void saveToCsv(String filename) throws IOException { //void for write csv file. Input String for name file
+        File file = new File(filename); //declare file
+        FileWriter fileWriter = new FileWriter(file, false);
+        boolean isFirst = true;
+
+        for (Map.Entry<String, UrlInfo> element : foundUrl.entrySet()) { //excluding reordering of keywords and write
+            if (isFirst) {
+                fileWriter.append(";");
+                fileWriter.append(element.getValue().getKeywordCounter().keySet().stream().map(String::toString).collect(Collectors.joining(";")));
+                fileWriter.append(System.lineSeparator()); //write new line
+            }
+            isFirst = false;
+            fileWriter.append(element.getValue().getUrl() + ";");
+            fileWriter.append(element.getValue().getKeywordCounter().values().stream().map(Object::toString).collect(Collectors.joining(";"))); //write csv output
+            fileWriter.append(System.lineSeparator()); //new line
+        }
+
+        fileWriter.close();
     }
 
 }
